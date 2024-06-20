@@ -1,5 +1,4 @@
 name: Build
-
 on:
   # push:
   workflow_dispatch:
@@ -14,4 +13,4 @@ jobs:
       - run: ndk-pkg setup
       - run: ndk-pkg sysinfo
       - run: ndk-pkg update
-      - run: ndk-pkg formula-repo-add
+      - run: ndk-pkg formula-repo-add test
