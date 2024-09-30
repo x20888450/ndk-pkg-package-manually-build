@@ -31,7 +31,7 @@ on:
       target-abis:
         description: input android abis to be built for
         required: true
-        default: arm64-v8a,armeabi-v7a,x86_64,x86
+        default: arm64-v8a,armeabi-v7a
 
       build-type:
         description: choose a build profile
