@@ -7,12 +7,13 @@ on:
       package-name:
         description: input the package name to be built
         required: true
-        default: zlib
+        default: libz
 
       target-api:
         description: choose the min sdk api level to be built with
         type: choice
         options:
+          - '35'
           - '34'
           - '33'
           - '32'
@@ -33,31 +34,31 @@ on:
         required: true
         default: arm64-v8a,armeabi-v7a
 
-      build-type:
+      profile:
         description: choose a build profile
         type: choice
         options:
           - release
           - debug
 
-      pack-type:
-        description: choose a pack type
+      bundle-type:
+        description: choose a bundle type
         type: choice
         options:
-          - tar.xz
-          - tar.lz
-          - tar.gz
-          - tar.bz2
-          - zip
+          - .tar.xz
+          - .tar.lz
+          - .tar.gz
+          - .tar.bz2
+          - .zip
 
       log-level:
         description: choose a log-level
         type: choice
         options:
-          - ''
-          - '-q'
-          - '-v'
-          - '-vv'
+          - 'normal'
+          - 'quiet'
+          - 'verbose'
+          - 'very-verbose'
 
       static:
         description: create fully statically linked executables
@@ -73,13 +74,47 @@ on:
         description: input the maven groupId, default is com.fpliu.ndk.pkg.prefab.android.<API>
 
 jobs:
+
+  base:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - id:  prepare
+        run: |
+          if [ ${{ github.event.inputs.static }} = true ] ; then
+            FSLE=--static
+          else
+            FSLE=
+          fi
+
+          case ${{ github.event.inputs.log-level }} in
+            normal)         LOG_LEVEL=''   ;;
+            quiet)          LOG_LEVEL='-q' ;;
+            verbose)        LOG_LEVEL='-v' ;;
+            'very-verbose') LOG_LEVEL='-x' ;;
+          esac
+
+          INSTALL_ARGS="$FSLE $LOG_LEVEL"
+
+          printf 'INSTALL_ARGS=%s\n' "$INSTALL_ARGS" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      install-args: ${{ steps.prepare.outputs.INSTALL_ARGS }}
+
+
+
   build:
+    needs: base
 
     runs-on: ubuntu-latest
 
     container: ubuntu:24.04
 
     steps:
+      - run: df -h
+      - run: export -p
+
       - run: apt -y update
       - run: apt -y install curl
 
@@ -90,20 +125,26 @@ jobs:
       - run: ./ndk-pkg setup
       - run: ./ndk-pkg sysinfo
       - run: ./ndk-pkg update
-
-      - if: ${{ github.event.inputs.static == 'true' }}
-        run: ./ndk-pkg install android-${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}/${{ github.event.inputs.package-name }} --profile=${{ github.event.inputs.build-type }} ${{ github.event.inputs.log-level }} --static
-
-      - if: ${{ github.event.inputs.static == 'false' }}
-        run: ./ndk-pkg install android-${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}/${{ github.event.inputs.package-name }} --profile=${{ github.event.inputs.build-type }} ${{ github.event.inputs.log-level }}
+      - run: ./ndk-pkg install android-${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}/${{ github.event.inputs.package-name }} --profile=${{ github.event.inputs.profile }} ${{ needs.base.outputs.install-args }}
 
       - name: pack
         run: |
           set -ex
           for item in $(./ndk-pkg ls-installed)
           do
-              ./ndk-pkg pack "$item" -t ${{ github.event.inputs.pack-type }}
+              ./ndk-pkg bundle "$item" ${{ github.event.inputs.bundle-type }}
           done
+
+      - run: ls
+
+      - run: du -sh *${{ github.event.inputs.bundle-type }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.package-name }}---android-${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}.${{ github.event.inputs.profile }}${{ github.event.inputs.bundle-type }}
+          path: ./*${{ github.event.inputs.bundle-type }}
+
+
 
       - if: ${{ github.event.inputs.generate-maven-repo == 'true' }}
         name: generate maven local repository
@@ -130,14 +171,11 @@ jobs:
           done
 
           if [ -d maven-local-repository-bundle ] ; then
-              tar cJvf maven-local-repository-bundle.tar.xz maven-local-repository-bundle
+              ~/.ndk-pkg/uppm/installed/bsdtar/bin/bsdtar cvaf maven-local-repository-bundle.tar.xz maven-local-repository-bundle
           fi
 
-      - run: ls
-
-      - run: du -sh *.tar.xz
-
-      - uses: actions/upload-artifact@v4
+      - if: ${{ github.event.inputs.generate-maven-repo == 'true' }}
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.package-name }}-android${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}
-          path: ${{ github.workspace }}/*.tar.xz
+          name: ${{ github.event.inputs.package-name }}---android-${{ github.event.inputs.target-api }}-${{ github.event.inputs.target-abis }}-maven-local-repository-bundle.tar.xz
+          path: maven-local-repository-bundle.tar.xz
